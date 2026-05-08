@@ -7,7 +7,6 @@ class Analisador
   def initialize
     @api_key = ENV['GEMINI_API_KEY']
 
-    # Perfil atualizado com as novas skills e foco em transição
     @meu_perfil = {
       formacao: "Engenharia de Transportes (Raciocínio lógico forte)",
       stack_principal: "Ruby on Rails, Java/Spring Boot",
@@ -18,11 +17,10 @@ class Analisador
     }.to_json
   end
 
-  def avaliar_vaga(titulo_vaga, texto_vaga)
-    # Usando o modelo que sua conta liberou
-    url = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=#{@api_key}")
-
-    # Prompt ajustado para ser MAIS BRANDO e focar em potencial
+  # Parâmetro de tentativas adicionado para evitar falha imediata
+  def avaliar_vaga(titulo_vaga, texto_vaga, tentativas = 0)
+    # Modelo alterado para 1.5-flash: garante maior volume de requisições por minuto/dia
+    url = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=#{@api_key}")
     prompt = <<~PROMPT
       Você é um recrutador técnico parceiro do candidato.
       Seu objetivo é encontrar oportunidades onde um Desenvolvedor Junior com base sólida em Engenharia possa prosperar.
@@ -59,21 +57,44 @@ class Analisador
 
       response = http.request(request)
 
-      if response.is_a?(Net::HTTPSuccess)
+      # Switch case para tratar as respostas do servidor com elegância
+      case response.code.to_i
+      when 200
         dados = JSON.parse(response.body)
         texto_resposta = dados.dig("candidates", 0, "content", "parts", 0, "text")
 
-        # Limpeza robusta do JSON
-        json_limpo = texto_resposta.gsub(/```json\n?/, '').gsub(/
-```/, '').strip
-        JSON.parse(json_limpo)
+        # Regex corrigida e em linha única para não quebrar a sintaxe
+        json_limpo = texto_resposta.gsub(/```json\n?/, '').gsub(/```/, '').strip
+        return JSON.parse(json_limpo)
+
+      when 429
+        # Respeita o limite da API (Free Tier) pausando a execução
+        if tentativas < 2
+          puts "🚨 Cota atingida (429). Pausando a execução por 45 segundos..."
+          sleep(45)
+          return avaliar_vaga(titulo_vaga, texto_vaga, tentativas + 1)
+        else
+          return { "score" => 0, "recomendado" => false, "justificativa" => "Cota da API esgotada." }
+        end
+
+      when 503
+        # Trata instabilidade temporária do servidor do Google
+        if tentativas < 3
+          puts "⚠️ Servidor ocupado (503). Retentando em 5 segundos..."
+          sleep(5)
+          return avaliar_vaga(titulo_vaga, texto_vaga, tentativas + 1)
+        else
+          return { "score" => 0, "recomendado" => false, "justificativa" => "Servidor do Google indisponível." }
+        end
+
       else
         puts ">>> ERRO DA API (Código #{response.code}): #{response.body}"
-        { "score" => 0, "recomendado" => false, "justificativa" => "Falha na comunicação." }
+        return { "score" => 0, "recomendado" => false, "justificativa" => "Erro HTTP não mapeado." }
       end
+
     rescue StandardError => e
-      puts "Erro de execução: #{e.message}"
-      { "score" => 0, "recomendado" => false, "justificativa" => "Erro interno." }
+      puts "Erro de execução interna: #{e.message}"
+      return { "score" => 0, "recomendado" => false, "justificativa" => "Erro interno no script Ruby." }
     end
   end
 end

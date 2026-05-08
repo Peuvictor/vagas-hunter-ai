@@ -3,94 +3,70 @@ require 'nokogiri'
 require 'open-uri'
 require 'set'
 require_relative 'analisador'
+require_relative 'scrapers/remotar'
+require_relative 'scrapers/programathor'
 
-puts "🚀 Iniciando caçada: Rails, Java, Spring Boot e Estágios..."
-
+# Configurações Iniciais
 ia = Analisador.new
 headers = { "User-Agent" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+vagas_processadas = Set.new
 
-# Lista de alvos refinada
-urls = [
-  'https://programathor.com.br/jobs-ruby-on-rails',
-  'https://programathor.com.br/jobs-java',
-  'https://programathor.com.br/jobs-spring-boot',
-  'https://programathor.com.br/jobs-estagio'
-]
+puts "🚀 **Iniciando caçada multi-site: Programathor + Remotar**"
 
-urls.each do |url|
+# 1. Coleta Consolidada
+# O orquestrador solicita as listas sem se preocupar com a implementação interna
+fila_de_vagas = []
+fila_de_vagas += ProgramathorScraper.extrair_vagas(headers)
+fila_de_vagas += RemotarScraper.extrair_vagas(headers)
+
+puts "📊 **Total capturado:** #{fila_de_vagas.size} vagas. Iniciando análise técnica..."
+
+# 2. Loop de Processamento Inteligente
+fila_de_vagas.each do |vaga|
+  # Extração de ID para evitar duplicatas na mesma execução
+  id_vaga = vaga[:link].split('/').last
+  next if vagas_processadas.include?(id_vaga)
+  vagas_processadas.add(id_vaga)
+
+  puts "\n" + "-" * 50
+  puts "⏳ **Analisando [#{vaga[:fonte]}]:** #{vaga[:titulo]}"
+
   begin
-    puts "\n🔎 Vasculhando: #{url.split('-').last.upcase}..."
-    html = URI.open(url, **headers).read
-    doc = Nokogiri::HTML(html, nil, 'UTF-8')
-    vagas = doc.css('.cell-list')
+    # Requisição ao detalhe da vaga
+    html_detalhe = URI.open(vaga[:link], **headers).read
+    doc_detalhe = Nokogiri::HTML(html_detalhe, nil, 'UTF-8')
 
-    if vagas.empty?
-      puts "⚠️ Nenhuma vaga recente nesta categoria."
-      next
-    end
+    # Seleção de CSS baseada na fonte (Nil-safe)
+    seletor = vaga[:fonte] == "Programathor" ? '.wrapper-content-job-show' : '.job-description'
+    elemento_desc = doc_detalhe.css(seletor).first
 
-    # Analisando as 2 primeiras de cada categoria para teste
-    vagas.first(2).each do |vaga|
-      titulo = vaga.css('h3').text.strip
-      link_parcial = vaga.css('a').first['href']
-      url_da_vaga = "https://programathor.com.br#{link_parcial}"
+    if elemento_desc
+      # Limpeza de ruído no texto
+      descricao = elemento_desc.text.strip.gsub(/\s+/, ' ')
 
-      print "⏳ Analisando: #{titulo[0..30]}... "
+      # Chamada para a IA (Gemini 2.5 Flash)
+      analise = ia.avaliar_vaga(vaga[:titulo], descricao)
 
-      html_detalhe = URI.open(url_da_vaga, **headers).read
-      doc_detalhe = Nokogiri::HTML(html_detalhe, nil, 'UTF-8')
-      descricao = doc_detalhe.css('.wrapper-content-job-show').text.strip.gsub(/\s+/, ' ')
-
-      analise = ia.avaliar_vaga(titulo, descricao)
-
-      # Filtro de relevância: Score acima de 60%
+      # Filtro de Exibição (Score >= 60)
       if analise['score'] >= 60
-        puts "\n✅ MATCH (Score: #{analise['score']}%)"
-        puts "🔗 Link: #{url_da_vaga}"
-        puts "💡 Por que: #{analise['justificativa']}"
-        puts "---"
+        puts "✅ **MATCH ENCONTRADO (#{analise['score']}%)**"
+        puts "🔗 **Link:** #{vaga[:link]}"
+        puts "💡 **Veredito:** #{analise['justificativa']}"
       else
-        puts "❌ Irrelevante (#{analise['score']}%)"
+        puts "❌ **Ignorada:** Match de apenas #{analise['score']}%"
       end
+    else
+      puts "⚠️ **Erro:** Não foi possível localizar o corpo da descrição."
     end
 
+    # Sleep estratégico para evitar bloqueios (Anti-Bot)
+    sleep(2)
+
+  rescue OpenURI::HTTPError => e
+    puts "⚠️ **Erro de Conexão:** #{vaga[:fonte]} retornou #{e.message}"
   rescue StandardError => e
-    puts "\n❌ Erro ao acessar #{url}: #{e.message}"
+    puts "⚠️ **Erro Crítico:** #{e.message}"
   end
 end
 
-puts "\n🏁 Varredura finalizada. Se houver match, o link está acima."
-
-vagas_processadas = Set.new # Memória da sessão atual
-
-urls.each do |url|
-  begin
-    puts "\n🔎 Vasculhando: #{url.split('-').last.upcase}..."
-    html = URI.open(url, **headers).read
-    doc = Nokogiri::HTML(html, nil, 'UTF-8')
-    vagas = doc.css('.cell-list')
-
-    vagas.first(3).each do |vaga|
-      link_parcial = vaga.css('a').first['href']
-      id_vaga = link_parcial.split('/').last # Extrai o ID único da vaga
-
-      # Pulo do gato: Se já processamos esse ID, pula para a próxima
-      if vagas_processadas.include?(id_vaga)
-        next
-      end
-
-      vagas_processadas.add(id_vaga)
-
-      titulo = vaga.css('h3').text.strip
-      url_da_vaga = "https://programathor.com.br#{link_parcial}"
-
-      # Pequeno sleep para evitar o erro 500/bloqueio de bot
-      sleep(1.5)
-
-      print "⏳ Analisando: #{titulo[0..30]}... "
-      # ... (resto do código de análise)
-    end
-  rescue StandardError => e
-    puts "\n❌ Erro ao acessar #{url}: #{e.message}"
-  end
-end
+puts "\n🏁 **Varredura finalizada. Boa sorte na candidatura!**"
