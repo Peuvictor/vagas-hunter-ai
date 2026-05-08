@@ -1,57 +1,72 @@
 require 'bundler/setup'
 require 'nokogiri'
 require 'open-uri'
-require 'set'
+require 'json' # Sai o Set, entra o JSON para memória permanente
 require_relative 'analisador'
 require_relative 'scrapers/remotar'
 require_relative 'scrapers/programathor'
+require_relative 'telegram_bot' # O Carteiro
 
 # Configurações Iniciais
 ia = Analisador.new
 headers = { "User-Agent" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-vagas_processadas = Set.new
 
-puts "🚀 **Iniciando caçada multi-site: Programathor + Remotar**"
+# Memória de Longo Prazo
+ARQUIVO_MEMORIA = 'vagas_vistas.json'
+vagas_processadas = File.exist?(ARQUIVO_MEMORIA) ? JSON.parse(File.read(ARQUIVO_MEMORIA)) : []
+
+puts "🚀 **Iniciando caçada diária: Programathor + Remotar**"
 
 # 1. Coleta Consolidada
-# O orquestrador solicita as listas sem se preocupar com a implementação interna
 fila_de_vagas = []
 fila_de_vagas += ProgramathorScraper.extrair_vagas(headers)
 fila_de_vagas += RemotarScraper.extrair_vagas(headers)
 
-puts "📊 **Total capturado:** #{fila_de_vagas.size} vagas. Iniciando análise técnica..."
+puts "📊 **Total capturado:** #{fila_de_vagas.size} vagas. Filtrando o que já vimos..."
+
+novos_matches = 0
 
 # 2. Loop de Processamento Inteligente
 fila_de_vagas.each do |vaga|
-  # Extração de ID para evitar duplicatas na mesma execução
   id_vaga = vaga[:link].split('/').last
+
+  # Ignora sumariamente se a vaga já estiver no JSON de execuções anteriores
   next if vagas_processadas.include?(id_vaga)
-  vagas_processadas.add(id_vaga)
+
+  # Filtro Rápido: Só gasta cota da API se o título fizer sentido
+  palavras_chave = /junior|jr|estagio|estágio|pleno|rails|ruby|java|spring/i
+  unless vaga[:titulo].match?(palavras_chave)
+    puts "⏭️  **Pulando (Fora do alvo):** #{vaga[:titulo]}"
+    vagas_processadas << id_vaga # Marca como vista para não avaliar amanhã
+    next
+  end
 
   puts "\n" + "-" * 50
   puts "⏳ **Analisando [#{vaga[:fonte]}]:** #{vaga[:titulo]}"
 
   begin
-    # Requisição ao detalhe da vaga
     html_detalhe = URI.open(vaga[:link], **headers).read
     doc_detalhe = Nokogiri::HTML(html_detalhe, nil, 'UTF-8')
 
-    # Seleção de CSS baseada na fonte (Nil-safe)
     seletor = vaga[:fonte] == "Programathor" ? '.wrapper-content-job-show' : '.job-description'
     elemento_desc = doc_detalhe.css(seletor).first
 
     if elemento_desc
-      # Limpeza de ruído no texto
       descricao = elemento_desc.text.strip.gsub(/\s+/, ' ')
-
-      # Chamada para a IA (Gemini 2.5 Flash)
       analise = ia.avaliar_vaga(vaga[:titulo], descricao)
 
-      # Filtro de Exibição (Score >= 60)
       if analise['score'] >= 60
         puts "✅ **MATCH ENCONTRADO (#{analise['score']}%)**"
-        puts "🔗 **Link:** #{vaga[:link]}"
-        puts "💡 **Veredito:** #{analise['justificativa']}"
+
+        # Disparo para o Telegram
+        mensagem = "🔥 *Nova Vaga Encontrada!*\n\n" \
+                   "🏢 *Fonte:* #{vaga[:fonte]}\n" \
+                   "🎯 *Score:* #{analise['score']}%\n" \
+                   "💼 *Título:* [#{vaga[:titulo]}](#{vaga[:link]})\n" \
+                   "💡 *Veredito:* #{analise['justificativa']}"
+
+        TelegramBot.enviar(mensagem)
+        novos_matches += 1
       else
         puts "❌ **Ignorada:** Match de apenas #{analise['score']}%"
       end
@@ -59,7 +74,8 @@ fila_de_vagas.each do |vaga|
       puts "⚠️ **Erro:** Não foi possível localizar o corpo da descrição."
     end
 
-    # Sleep estratégico para evitar bloqueios (Anti-Bot)
+    # Grava na memória para não processar novamente
+    vagas_processadas << id_vaga
     sleep(2)
 
   rescue OpenURI::HTTPError => e
@@ -69,4 +85,6 @@ fila_de_vagas.each do |vaga|
   end
 end
 
-puts "\n🏁 **Varredura finalizada. Boa sorte na candidatura!**"
+# 3. Salva o estado atualizado no disco
+File.write(ARQUIVO_MEMORIA, JSON.pretty_generate(vagas_processadas.uniq))
+puts "\n🏁 **Varredura finalizada. #{novos_matches} alertas enviados para o seu Telegram.**"
