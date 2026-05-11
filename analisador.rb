@@ -13,14 +13,15 @@ class Analisador
       infra: "PostgreSQL, Sidekiq, Docker, Google Cloud (GCP), Azure",
       extras: "JavaScript, Metodologias Ágeis (Scrum/Kanban)",
       projetos: "BH Agendamentos (SaaS), Filmow Scraper",
-      senioridade_alvo: "Estágio, Junior ou Pleno"
+      senioridade_alvo: "Estágio ou Junior" # <-- Pleno removido daqui
     }.to_json
   end
 
   # Parâmetro de tentativas adicionado para evitar falha imediata
   def avaliar_vaga(titulo_vaga, texto_vaga, tentativas = 0)
-    # Modelo alterado para 1.5-flash: garante maior volume de requisições por minuto/dia
-    url = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=#{@api_key}")
+    # Modelo cravado no 2.5-flash
+    url = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=#{@api_key}")
+
     prompt = <<~PROMPT
       Você é um recrutador técnico parceiro do candidato.
       Seu objetivo é encontrar oportunidades onde um Desenvolvedor Junior com base sólida em Engenharia possa prosperar.
@@ -32,11 +33,10 @@ class Analisador
       Descrição: #{texto_vaga}
 
       Avalie o match considerando:
-      1. Se a vaga pede Junior/Pleno ou Estágio, o match deve ser ALTO.
+      1. A vaga DEVE ser explicitamente para Junior ou Estágio. Se a descrição pedir nível Pleno, Sênior ou Especialista, dê score 0.
       2. Se o candidato tem a stack principal (Ruby ou Java), valorize isso.
       3. Se a vaga pede Docker ou Nuvem (GCP/Azure), aumente a nota.
       4. Ignore exigências absurdas de tempo de experiência para vagas Junior.
-      5. Se a vaga for Sênior ou Especialista, mantenha a nota baixa por segurança.
 
       Retorne APENAS um JSON:
       {
@@ -64,7 +64,8 @@ class Analisador
         texto_resposta = dados.dig("candidates", 0, "content", "parts", 0, "text")
 
         # Regex corrigida e em linha única para não quebrar a sintaxe
-        json_limpo = texto_resposta.gsub(/```json\n?/, '').gsub(/```/, '').strip
+        json_limpo = texto_resposta.gsub(/```json\n?/, '').gsub(/
+```/, '').strip
         return JSON.parse(json_limpo)
 
       when 429

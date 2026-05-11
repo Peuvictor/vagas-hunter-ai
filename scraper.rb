@@ -1,11 +1,11 @@
 require 'bundler/setup'
 require 'nokogiri'
 require 'open-uri'
-require 'json' # Sai o Set, entra o JSON para memória permanente
+require 'json'
 require_relative 'analisador'
 require_relative 'scrapers/remotar'
 require_relative 'scrapers/programathor'
-require_relative 'telegram_bot' # O Carteiro
+require_relative 'telegram_bot'
 
 # Configurações Iniciais
 ia = Analisador.new
@@ -33,10 +33,12 @@ fila_de_vagas.each do |vaga|
   # Ignora sumariamente se a vaga já estiver no JSON de execuções anteriores
   next if vagas_processadas.include?(id_vaga)
 
-  # Filtro Rápido: Só gasta cota da API se o título fizer sentido
-  palavras_chave = /junior|jr|estagio|estágio|pleno|rails|ruby|java|spring/i
-  unless vaga[:titulo].match?(palavras_chave)
-    puts "⏭️  **Pulando (Fora do alvo):** #{vaga[:titulo]}"
+  # Filtro Rigoroso: Apenas Junior/Estágio, bloqueando Pleno e Sênior
+  palavras_alvo = /junior|jr|estagio|estágio/i
+  palavras_bloqueadas = /pleno|senior|sênior|sr/i
+
+  if vaga[:titulo].match?(palavras_bloqueadas) || !vaga[:titulo].match?(palavras_alvo)
+    puts "⏭️  **Pulando (Nível incompatível):** #{vaga[:titulo]}"
     vagas_processadas << id_vaga # Marca como vista para não avaliar amanhã
     next
   end
