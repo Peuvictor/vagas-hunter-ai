@@ -46,7 +46,7 @@ fila_de_vagas.each do |vaga|
   next if vagas_processadas.include?(id_vaga)
 
   # Filtro Rigoroso: Apenas Junior/Estágio, bloqueando Pleno e Sênior
-  palavras_alvo = /junior|jr|estagio|estágio/i
+ palavras_alvo = /junior|júnior|jr|estagio|estágio/i
   palavras_bloqueadas = /pleno|senior|sênior|sr/i
 
   if vaga[:titulo].match?(palavras_bloqueadas) || !vaga[:titulo].match?(palavras_alvo)
