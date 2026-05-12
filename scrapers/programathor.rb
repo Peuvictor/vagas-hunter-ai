@@ -1,31 +1,33 @@
+require 'nokogiri'
+require 'open-uri'
+
 class ProgramathorScraper
   def self.extrair_vagas(headers)
-    # Categorias verificadas; se uma der 404, o begin/rescue ignora e pula para a próxima
-    categorias = ['ruby-on-rails', 'java', 'estagio']
+    # Rota principal absoluta. Mais difícil de dar 404.
+    url = "https://programathor.com.br/jobs"
     vagas_encontradas = []
 
-    categorias.each do |cat|
-      url = "https://programathor.com.br/jobs-#{cat}"
-      begin
-        html = URI.open(url, **headers).read
-        doc = Nokogiri::HTML(html, nil, 'UTF-8')
+    begin
+      html = URI.open(url, **headers).read
+      doc = Nokogiri::HTML(html, nil, 'UTF-8')
 
-        doc.css('.cell-list').each do |vaga|
-          link_tag = vaga.css('a').first
-          next unless link_tag # Pula se não encontrar o link (evita o erro '[]' for nil)
+      doc.css('.cell-list').each do |vaga|
+        link_tag = vaga.css('a').first
+        next unless link_tag
 
-          vagas_encontradas << {
-            titulo: vaga.css('h3').text.strip,
-            link: "https://programathor.com.br#{link_tag['href']}",
-            fonte: "Programathor"
-          }
-        end
-      rescue OpenURI::HTTPError => e
-        puts "⚠️ Categoria #{cat} não encontrada no Programathor (404)."
-      rescue => e
-        puts "⚠️ Erro inesperado no Programathor (#{cat}): #{e.message}"
+        titulo_tag = vaga.css('h3').first
+        next unless titulo_tag
+
+        vagas_encontradas << {
+          titulo: titulo_tag.text.strip,
+          link: "https://programathor.com.br#{link_tag['href']}",
+          fonte: "Programathor"
+        }
       end
+    rescue => e
+      puts "⚠️ Erro no Programathor: #{e.message}"
     end
+
     vagas_encontradas.uniq { |v| v[:link] }
   end
 end
