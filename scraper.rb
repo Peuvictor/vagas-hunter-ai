@@ -5,6 +5,7 @@ require 'json'
 require_relative 'analisador'
 require_relative 'scrapers/remotar'
 require_relative 'scrapers/programathor'
+require_relative 'scrapers/vagas_com'
 require_relative 'telegram_bot'
 
 # Configurações Iniciais
@@ -15,12 +16,13 @@ headers = { "User-Agent" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 ARQUIVO_MEMORIA = 'vagas_vistas.json'
 vagas_processadas = File.exist?(ARQUIVO_MEMORIA) ? JSON.parse(File.read(ARQUIVO_MEMORIA)) : []
 
-puts "🚀 **Iniciando caçada diária: Programathor + Remotar**"
+puts "🚀 **Iniciando caçada diária: Programathor + Remotar + Vagas.com**"
 
 # 1. Coleta Consolidada
 fila_de_vagas = []
 fila_de_vagas += ProgramathorScraper.extrair_vagas(headers)
 fila_de_vagas += RemotarScraper.extrair_vagas(headers)
+fila_de_vagas += VagasComScraper.extrair_vagas(headers)
 
 puts "📊 **Total capturado:** #{fila_de_vagas.size} vagas. Filtrando o que já vimos..."
 
@@ -50,7 +52,13 @@ fila_de_vagas.each do |vaga|
     html_detalhe = URI.open(vaga[:link], **headers).read
     doc_detalhe = Nokogiri::HTML(html_detalhe, nil, 'UTF-8')
 
-    seletor = vaga[:fonte] == "Programathor" ? '.wrapper-content-job-show' : '.job-description'
+    # Seleção de CSS dinâmica baseada na fonte da vaga
+    seletor = case vaga[:fonte]
+              when "Programathor" then '.wrapper-content-job-show'
+              when "Vagas.com" then '.job-tab-content'
+              else '.job-description' # Default para o Remotar
+              end
+
     elemento_desc = doc_detalhe.css(seletor).first
 
     if elemento_desc
