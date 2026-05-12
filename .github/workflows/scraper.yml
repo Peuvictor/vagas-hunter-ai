@@ -4,13 +4,15 @@ on:
   schedule:
     # 12:00 UTC equivale a 09:00 BRT (Horário de Brasília)
     - cron: '0 12 * * *'
-  workflow_dispatch: # Adiciona um botão para você rodar manualmente pelo GitHub
+  workflow_dispatch:
 
 jobs:
   rodar-bot:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Força a versão nova e cala o aviso
     permissions:
-      contents: write # Dá permissão para o bot salvar o arquivo JSON de volta
+      contents: write
 
     steps:
     - name: Clonar o repositório
@@ -19,8 +21,8 @@ jobs:
     - name: Configurar o Ruby
       uses: ruby/setup-ruby@v1
       with:
-        ruby-version: '3.2' # Versão estável
-        bundler-cache: true # Instala as gems rapidamente
+        ruby-version: '3.2'
+        bundler-cache: true
 
     - name: Executar a varredura
       env:
@@ -34,5 +36,4 @@ jobs:
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add vagas_vistas.json
-        # Só faz o commit se houver vagas novas na memória
         git diff --quiet && git diff --staged --quiet || (git commit -m "chore: atualiza memoria de vagas processadas [skip ci]" && git push)
